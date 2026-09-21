@@ -43,10 +43,7 @@
     send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
     left: '<path d="m15 18-6-6 6-6"/>',
     right: '<path d="m9 18 6-6-6-6"/>',
-    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
-    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>',
-    reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
     message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
     pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
@@ -448,9 +445,6 @@
         <div class="foot-tools">
           <button class="tool notification-trigger" data-action="notifications" title="Notifications">${icon('bell', 14)}<span>Alerts</span>${unreadNotifications() ? `<b>${unreadNotifications()}</b>` : ''}</button>
           <button class="tool" data-action="logout" title="Sign out">${icon('logout', 14)}Sign out</button>
-          <button class="tool" data-action="export" title="Download a backup you can share">${icon('download', 14)}Export</button>
-          <button class="tool" data-action="import" title="Load a backup file">${icon('upload', 14)}Import</button>
-          <button class="tool" data-action="reset" title="Restore the demo workspace">${icon('reset', 14)}Reset</button>
         </div>
       </div>`;
   }
@@ -978,46 +972,6 @@
   }
 
   /* ---------------------------------------------------------
-     Backup, restore, reset
-     --------------------------------------------------------- */
-  function exportData() {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `crewboard-${todayISO()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    toast('Backup downloaded');
-  }
-
-  function importData(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const parsed = parseData(String(reader.result));
-      if (!parsed) { toast("That file isn't a Crewboard backup"); return; }
-      if (!confirm('Replace everything in this workspace with the imported file?')) return;
-      data = parsed;
-      normalizeUI();
-      save(); saveUI();
-      renderAll();
-      toast('Workspace imported');
-    };
-    reader.readAsText(file);
-  }
-
-  function resetData() {
-    if (!confirm('Reset to the demo workspace? Your current tasks and messages will be replaced.')) return;
-    data = seed();
-    ui.me = data.members[0].id; ui.filter = null; ui.search = ''; ui.view = 'board'; ui.channel = data.channels[0].id;
-    normalizeUI();
-    save(); saveUI();
-    renderAll();
-    toast('Demo workspace restored');
-  }
-
-  /* ---------------------------------------------------------
      Toast and mobile nav
      --------------------------------------------------------- */
   function toast(msg) {
@@ -1096,9 +1050,6 @@
         break;
       case 'add-channel': openChannel(); break;
 
-      case 'export': exportData(); break;
-      case 'import': $('#import-file').click(); break;
-      case 'reset': resetData(); break;
     }
   });
 
@@ -1127,9 +1078,6 @@
       renderSidebar();
       if (ui.view === 'chat') renderMessages(false);
       const sel = $('#me-select'); if (sel) sel.focus();
-    } else if (t.id === 'import-file') {
-      if (t.files && t.files[0]) importData(t.files[0]);
-      t.value = '';
     } else if (modal && modal.kind === 'task') {
       const task = modal.task;
       if (t.id === 'tm-status') {
