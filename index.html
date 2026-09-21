@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crewboard: team tasks and chat</title>
+  <meta name="description" content="A simple shared task board, list, calendar and chat for small teams.">
+
+  <!-- Fonts are optional. If you are offline the app falls back to your system fonts. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section class="auth-screen" id="auth-screen" aria-label="Sign in">
+    <div class="auth-card">
+      <div class="auth-mark">C</div>
+      <p class="eyebrow">Crewboard</p>
+      <h1>Welcome back</h1>
+      <p class="auth-copy">Sign in to see your tasks, conversations, and notifications.</p>
+      <form id="login-form" autocomplete="on">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <button class="btn primary auth-submit" type="submit">Sign in</button>
+        <p class="auth-error" id="login-error" role="alert"></p>
+      </form>
+    </div>
+  </section>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="Workspace"></aside>
+    <div class="scrim" data-action="close-nav"></div>
+
+    <main class="main">
+      <header class="topbar" id="topbar"></header>
+      <div class="content" id="content" tabindex="-1"></div>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept=".json,application/json" hidden>
+
+  <noscript>Crewboard needs JavaScript turned on to run.</noscript>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

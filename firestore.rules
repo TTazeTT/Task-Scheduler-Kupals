@@ -1,0 +1,93 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function userExists() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return userExists()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /users/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+      allow create: if isSelf(userId);
+      allow update: if isSelf(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid;
+
+      allow update: if signedIn()
+        && (
+          isAdmin()
+          || resource.data.createdBy == request.auth.uid
+          || request.auth.uid in resource.data.assignees
+          || request.auth.uid in request.resource.data.assignees
+        );
+
+      allow delete: if isAdmin()
+        || (
+          signedIn()
+          && resource.data.createdBy == request.auth.uid
+        );
+    }
+
+    match /channels/{channelId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if signedIn();
+
+        allow create: if signedIn()
+          && request.resource.data.by == request.auth.uid;
+
+        allow update, delete: if isAdmin()
+          || (
+            signedIn()
+            && resource.data.by == request.auth.uid
+          );
+      }
+    }
+
+    match /notifications/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+      allow create: if isAdmin();
+      allow update: if isSelf(userId) || isAdmin();
+      allow delete: if isSelf(userId) || isAdmin();
+
+      match /items/{notificationId} {
+        allow read: if isSelf(userId) || isAdmin();
+        allow create: if isAdmin();
+        allow update: if isSelf(userId) || isAdmin();
+        allow delete: if isSelf(userId) || isAdmin();
+      }
+    }
+
+    match /workspace/{workspaceId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
