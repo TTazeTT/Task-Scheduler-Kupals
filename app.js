@@ -1,7 +1,7 @@
 /* ==========================================================
    Crewboard: a small shared task tracker with chat.
-   No build step, no dependencies. Data lives in the browser
-   (localStorage), so it survives refreshes.
+   No build step or bundler. Firebase is the shared source of truth;
+   localStorage is retained only as an offline/startup fallback.
    ========================================================== */
 (() => {
   'use strict';
@@ -13,6 +13,7 @@
   const UI_KEY = 'crewboard.ui.v1';       // per-tab state: who am I, which view (sessionStorage)
   const AUTH_KEY = 'crewboard.auth.v1';
   const NOTIFY_KEY = 'crewboard.notifications.v1';
+  const WORKSPACE_ID = 'main';
 
   const STATUSES = [
     { id: 'todo', label: 'To do' },
@@ -161,6 +162,7 @@
           sys('Ines Duarte moved “Design the poster and social tiles” to In review', 40),
         ],
       },
+      notifications: {},
     };
   }
 
@@ -187,6 +189,7 @@
       d.channels.push({ id: 'activity', name: 'activity', topic: 'Automatic updates whenever a task changes' });
     }
     for (const c of d.channels) if (!Array.isArray(d.messages[c.id])) d.messages[c.id] = [];
+    d.notifications = d.notifications && typeof d.notifications === 'object' ? d.notifications : {};
     return d;
   }
 
@@ -206,7 +209,26 @@
     } catch (e) { /* storage blocked: fall through to demo data */ }
     return seed();
   }
-  function save() { try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ } }
+  let firestore = null;
+  let cloudReady = false;
+  let cloudUnsubscribe = null;
+  let cloudWrite = Promise.resolve();
+
+  function save() {
+    try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+    if (!cloudReady || !firestore || !authUser) return;
+    const payload = JSON.parse(JSON.stringify({ members: data.members, tasks: data.tasks, channels: data.channels, messages: data.messages, notifications: data.notifications || {} }));
+    cloudWrite = cloudWrite
+      .then(() => firestore.collection('workspace').doc(WORKSPACE_ID).set({
+        ...payload,
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: authUser.uid
+      }, { merge: true }))
+      .catch(error => {
+        console.error('Crewboard could not save to Firestore.', error);
+        toast('Cloud save failed. Your local copy is still available.');
+      });
+  }
 
   function loadUI() {
     const base = { me: data.members[0].id, view: 'board', channel: data.channels[0].id, filter: null, search: '', calMonth: `${todayISO().slice(0, 8)}01` };
@@ -256,6 +278,7 @@
     $('#auth-screen').classList.add('hidden');
     $('#app').classList.add('ready');
     normalizeUI(); saveUI(); renderAll();
+    connectFirestore();
   }
 
   function showLoginError(message) {
@@ -274,10 +297,11 @@
   }
 
   function notifications() {
-    try { return JSON.parse(localStorage.getItem(NOTIFY_KEY) || '{}'); } catch (e) { return {}; }
+    return data.notifications || {};
   }
   function saveNotifications(value) {
-    try { localStorage.setItem(NOTIFY_KEY, JSON.stringify(value)); } catch (e) { /* storage blocked */ }
+    data.notifications = value;
+    save();
   }
   function notify(memberId, text, taskId = null) {
     if (!memberId || memberId === ui.me) return;
@@ -305,6 +329,40 @@
     const all = notifications();
     all[ui.me] = (all[ui.me] || []).map(n => readId === 'all' || n.id === readId ? { ...n, read: true } : n);
     saveNotifications(all); closeModal(); renderSidebar();
+  }
+
+  function connectFirestore() {
+    if (!firebaseReady() || !window.firebase.firestore) return;
+    try {
+      if (!firestore) firestore = window.firebase.firestore();
+      if (cloudUnsubscribe) cloudUnsubscribe();
+      cloudUnsubscribe = firestore.collection('workspace').doc(WORKSPACE_ID).onSnapshot(snapshot => {
+        if (snapshot.exists) {
+          const remote = snapshot.data();
+          data = normalize({
+            members: Array.isArray(remote.members) ? remote.members : data.members,
+            tasks: Array.isArray(remote.tasks) ? remote.tasks : data.tasks,
+            channels: Array.isArray(remote.channels) ? remote.channels : data.channels,
+            messages: remote.messages && typeof remote.messages === 'object' ? remote.messages : data.messages,
+            notifications: remote.notifications || data.notifications
+          });
+          cloudReady = true;
+          try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) { /* storage blocked */ }
+          normalizeUI();
+          renderAll();
+        } else {
+          cloudReady = true;
+          save();
+        }
+      }, error => {
+        console.error('Crewboard could not read Firestore.', error);
+        cloudReady = false;
+        toast('Cloud data could not be loaded. Check your Firestore rules.');
+      });
+    } catch (error) {
+      console.error('Crewboard could not connect to Firestore.', error);
+      toast('Firestore is unavailable. The local fallback is still active.');
+    }
   }
 
   /* ---------------------------------------------------------
