@@ -192,6 +192,11 @@
     }
     for (const c of d.channels) if (!Array.isArray(d.messages[c.id])) d.messages[c.id] = [];
     d.notifications = d.notifications && typeof d.notifications === 'object' ? d.notifications : {};
+    for (const memberId of Object.keys(d.notifications)) {
+      d.notifications[memberId] = Array.isArray(d.notifications[memberId])
+        ? d.notifications[memberId].filter(n => n && n.id && !n.read)
+        : [];
+    }
     return d;
   }
 
@@ -324,11 +329,11 @@
     data.notifications = value;
     save();
   }
-  function notify(memberId, text, taskId = null) {
+  function notify(memberId, text, taskId = null, channelId = null) {
     if (!memberId || memberId === ui.me) return;
     const all = notifications();
     all[memberId] = Array.isArray(all[memberId]) ? all[memberId] : [];
-    all[memberId].unshift({ id: uid('n_'), text, taskId, ts: Date.now(), read: false });
+    all[memberId].unshift({ id: uid('n_'), text, taskId, channelId, ts: Date.now() });
     all[memberId] = all[memberId].slice(0, 100);
     saveNotifications(all);
   }
@@ -342,13 +347,12 @@
     mountModal(`
       <div class="modal notification-modal" role="dialog" aria-modal="true" aria-labelledby="notification-title">
         <div class="modal-head"><div><h2 id="notification-title">Notifications</h2><p class="modal-sub">${items.length ? `${unreadNotifications()} unread` : 'You are all caught up'}</p></div><button class="icon-btn" data-action="close-modal" aria-label="Close">${icon('x')}</button></div>
-        <div class="notification-list">${items.length ? items.map(n => `<button class="notification-item ${n.read ? '' : 'unread'}" data-action="read-notification" data-id="${n.id}" data-task="${n.taskId || ''}"><span class="notification-dot"></span><span><strong>${esc(n.text)}</strong><time>${fmtStamp(n.ts)}</time></span></button>`).join('') : '<p class="empty-state">Mentions, assignments, and task changes will appear here.</p>'}</div>
-        ${items.some(n => !n.read) ? '<button class="btn" data-action="read-all-notifications">Mark all as read</button>' : ''}
+        <div class="notification-list">${items.length ? items.map(n => `<button class="notification-item unread" data-action="read-notification" data-id="${n.id}" data-task="${n.taskId || ''}" data-channel="${n.channelId || ''}"><span class="notification-dot"></span><span><strong>${esc(n.text)}</strong><time>${fmtStamp(n.ts)}</time></span></button>`).join('') : '<p class="empty-state">Mentions, assignments, and task changes will appear here.</p>'}</div>
       </div>`, null);
   }
   function markNotifications(readId) {
     const all = notifications();
-    all[ui.me] = (all[ui.me] || []).map(n => readId === 'all' || n.id === readId ? { ...n, read: true } : n);
+    all[ui.me] = (all[ui.me] || []).filter(n => n.id !== readId);
     saveNotifications(all); closeModal(); renderSidebar();
   }
 
@@ -777,7 +781,7 @@
     (data.messages[ui.channel] = data.messages[ui.channel] || []).push({ id: uid('g_'), by: me().id, text, ts: Date.now() });
     for (const member of data.members) {
       if (member.id !== me().id && mentionsMember(text, member)) {
-        notify(member.id, `${me().name} mentioned you in #${channelById(ui.channel).name}`);
+        notify(member.id, `${me().name} mentioned you in #${channelById(ui.channel).name}`, null, ui.channel);
       }
     }
     input.value = '';
@@ -1115,10 +1119,12 @@
         openNotifications(); break;
       case 'read-notification':
         markNotifications(id);
-        if (el.dataset.task) openTask(el.dataset.task);
+        if (el.dataset.task) {
+          ui.view = 'board'; ui.filter = null; saveUI(); renderAll(); openTask(el.dataset.task);
+        } else if (el.dataset.channel) {
+          ui.view = 'chat'; ui.channel = el.dataset.channel; ui.filter = null; saveUI(); renderAll();
+        }
         break;
-      case 'read-all-notifications':
-        markNotifications('all'); break;
       case 'logout':
         signOut(); break;
 
