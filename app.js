@@ -70,6 +70,8 @@
   const firstName = n => n.trim().split(/\s+/)[0];
   const listNames = a => (a.length <= 1 ? (a[0] || '') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
   const slug = s => s.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const mentionKeys = m => [...new Set([firstName(m.name), m.name, (m.email || '').split('@')[0]].filter(Boolean))];
+  const mentionsMember = (text, member) => mentionKeys(member).some(key => new RegExp(`(^|\\s)@${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$|[.,!?])`, 'i').test(text));
 
   function inkOn(hex) {
     const n = parseInt(hex.slice(1), 16);
@@ -193,6 +195,20 @@
     return d;
   }
 
+  function emptyWorkspace(member) {
+    return normalize({
+      members: member ? [{ id: member.uid, name: member.email, email: member.email, color: PALETTE[0] }] : [],
+      tasks: [],
+      channels: [
+        { id: 'general', name: 'general', topic: 'Everyday chat for the whole crew' },
+        { id: 'ideas', name: 'ideas', topic: 'Half-baked thoughts welcome' },
+        { id: 'activity', name: 'activity', topic: 'Automatic updates whenever a task changes' },
+      ],
+      messages: { general: [], ideas: [], activity: [] },
+      notifications: {},
+    });
+  }
+
   function parseData(text) {
     try {
       const d = JSON.parse(text);
@@ -217,7 +233,7 @@
   function save() {
     try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
     if (!cloudReady || !firestore || !authUser) return;
-    const payload = JSON.parse(JSON.stringify({ members: data.members, tasks: data.tasks, channels: data.channels, messages: data.messages, notifications: data.notifications || {} }));
+    const payload = JSON.parse(JSON.stringify({ initialized: true, members: data.members, tasks: data.tasks, channels: data.channels, messages: data.messages, notifications: data.notifications || {} }));
     cloudWrite = cloudWrite
       .then(() => firestore.collection('workspace').doc(WORKSPACE_ID).set({
         ...payload,
@@ -267,9 +283,14 @@
     authUser = member || authUser || { uid: 'demo', email: 'demo@crewboard.local' };
     let matched = currentAuthMember();
     if (!matched && authUser.email && authUser.uid !== 'demo') {
-      matched = { id: authUser.uid, name: authUser.displayName || authUser.email.split('@')[0], email: authUser.email, color: PALETTE[data.members.length % PALETTE.length] };
+      matched = { id: authUser.uid, name: authUser.email, email: authUser.email, color: PALETTE[data.members.length % PALETTE.length] };
       data.members.push(matched);
       save();
+    }
+    if (matched && authUser.uid !== 'demo') {
+      matched.id = authUser.uid;
+      matched.email = authUser.email;
+      if (!matched.name || matched.name === 'hmdeanon') matched.name = authUser.email;
     }
     if (matched) {
       ui.me = matched.id;
@@ -339,6 +360,12 @@
       cloudUnsubscribe = firestore.collection('workspace').doc(WORKSPACE_ID).onSnapshot(snapshot => {
         if (snapshot.exists) {
           const remote = snapshot.data();
+          if (!remote.initialized) {
+            data = emptyWorkspace(authUser);
+            cloudReady = true;
+            save();
+            return;
+          }
           data = normalize({
             members: Array.isArray(remote.members) ? remote.members : data.members,
             tasks: Array.isArray(remote.tasks) ? remote.tasks : data.tasks,
@@ -346,11 +373,25 @@
             messages: remote.messages && typeof remote.messages === 'object' ? remote.messages : data.messages,
             notifications: remote.notifications || data.notifications
           });
+          let addedCurrent = false;
+          let current = data.members.find(m => m.id === authUser.uid) || data.members.find(m => m.email === authUser.email);
+          if (!current && authUser.uid !== 'demo') {
+            current = { id: authUser.uid, name: authUser.email, email: authUser.email, color: PALETTE[data.members.length % PALETTE.length] };
+            data.members.push(current);
+            addedCurrent = true;
+          }
+          if (current) {
+            current.id = authUser.uid;
+            current.email = authUser.email;
+            if (!current.name || current.name === 'hmdeanon') current.name = authUser.email;
+          }
           cloudReady = true;
+          if (addedCurrent) save();
           try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) { /* storage blocked */ }
           normalizeUI();
           renderAll();
         } else {
+          data = emptyWorkspace(authUser);
           cloudReady = true;
           save();
         }
@@ -420,7 +461,7 @@
   function fmtText(text) {
     return esc(text)
       .replace(/@([\p{L}\p{N}_]+)/gu, (m, name) => {
-        const mem = data.members.find(x => firstName(x.name).toLowerCase() === name.toLowerCase());
+        const mem = data.members.find(x => mentionKeys(x).some(key => key.toLowerCase() === name.toLowerCase()));
         if (!mem) return m;
         return `<span class="mention ${mem.id === me().id ? 'is-me' : ''}" style="--who:${esc(mem.color)}">@${esc(firstName(mem.name))}</span>`;
       })
@@ -498,7 +539,8 @@
       <div class="side-foot">
         <div class="me-row">
           ${avatar(mine, 30)}
-          <span class="signed-in-user"><strong>${esc(mine.name)}</strong><small>Signed in</small></span>
+          <span class="signed-in-user"><strong>${esc(mine.name)}</strong><small>${esc(authUser && authUser.email ? authUser.email : 'Signed in')}</small></span>
+          <button class="side-btn" data-action="edit-member" data-id="${mine.id}" aria-label="Edit your username">${icon('pencil', 14)}</button>
         </div>
         <div class="foot-tools">
           <button class="tool notification-trigger" data-action="notifications" title="Notifications">${icon('bell', 14)}<span>Alerts</span>${unreadNotifications() ? `<b>${unreadNotifications()}</b>` : ''}</button>
@@ -734,7 +776,7 @@
     if (!text) return;
     (data.messages[ui.channel] = data.messages[ui.channel] || []).push({ id: uid('g_'), by: me().id, text, ts: Date.now() });
     for (const member of data.members) {
-      if (member.id !== me().id && new RegExp(`@${firstName(member.name)}\\b`, 'i').test(text)) {
+      if (member.id !== me().id && mentionsMember(text, member)) {
         notify(member.id, `${me().name} mentioned you in #${channelById(ui.channel).name}`);
       }
     }
@@ -973,9 +1015,10 @@
     if (id) {
       const m = memberById(id);
       m.name = name; m.color = color;
+      if (m.id === ui.me && authUser && authUser.email) m.email = authUser.email;
       toast('Teammate updated');
     } else {
-      const m = { id: uid('m_'), name, color };
+      const m = { id: uid('m_'), name, email: '', color };
       data.members.push(m);
       postSystem(`${name} joined the crew`);
       toast(`${firstName(name)} added`);
@@ -1179,7 +1222,7 @@
         if (!text || !modal) return;
         modal.task.comments.push({ id: uid('k_'), by: me().id, text, ts: Date.now() });
         for (const member of data.members) {
-          if (member.id !== me().id && new RegExp(`@${firstName(member.name)}\\b`, 'i').test(text)) {
+          if (member.id !== me().id && mentionsMember(text, member)) {
             notify(member.id, `${me().name} mentioned you on “${modal.task.title}”`, modal.task.id);
           }
         }
